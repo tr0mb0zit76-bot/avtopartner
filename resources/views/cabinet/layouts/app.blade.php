@@ -9,6 +9,9 @@
     <!-- Базовые стили -->
     <link rel="stylesheet" href="{{ asset('css/cabinet.css') }}">
     
+    <!-- Handsontable CSS - правильная версия -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.2.0/dist/handsontable.full.min.css">
+    
     <!-- Тема пользователя (светлая/тёмная) -->
     @php
         $theme = session('user_theme', 'light');
@@ -27,7 +30,33 @@
             </div>
             
             <div class="header-actions">
+                <!-- Информация о пользователе -->
+                @auth
+                <div class="user-info">
+                    <span class="user-name">{{ auth()->user()->name }}</span>
+                    <span class="user-role">{{ auth()->user()->role->display_name ?? 'Пользователь' }}</span>
+                </div>
+                @endauth
+                
+                <!-- Меню навигации -->
+                <div class="nav-menu">
+                    <a href="{{ route('cabinet.orders.index') }}" class="nav-link {{ request()->routeIs('cabinet.orders.*') ? 'active' : '' }}">
+                        📋 Заявки
+                    </a>
+                    @if(auth()->check() && (auth()->user()->isAdmin() || auth()->user()->isSupervisor()))
+                        <a href="{{ route('cabinet.reports.index') }}" class="nav-link {{ request()->routeIs('cabinet.reports.*') ? 'active' : '' }}">
+                            📊 Отчёты
+                        </a>
+                    @endif
+                    @if(auth()->check() && auth()->user()->isAdmin())
+                        <a href="{{ route('cabinet.users.index') }}" class="nav-link {{ request()->routeIs('cabinet.users.*') ? 'active' : '' }}">
+                            👥 Пользователи
+                        </a>
+                    @endif
+                </div>
+                
                 <!-- Переключатель темы -->
+                @if(isset($theme))
                 <div class="theme-switcher">
                     <form method="POST" action="{{ route('cabinet.theme.switch') }}" class="theme-form" id="themeForm">
                         @csrf
@@ -41,6 +70,7 @@
                         </button>
                     </form>
                 </div>
+                @endif
                 
                 <!-- Кнопка возврата на сайт -->
                 <a href="{{ current_site()->home_url ?? '/' }}" class="back-to-site">
@@ -55,8 +85,12 @@
         </main>
     </div>
 
-    <!-- Скрипты -->
+    <!-- Handsontable JS - правильная версия -->
+    <script src="https://cdn.jsdelivr.net/npm/handsontable@14.2.0/dist/handsontable.full.min.js"></script>
+    
+    <!-- Общие скрипты -->
     <script src="{{ asset('js/cabinet.js') }}"></script>
+    
     @stack('scripts')
 </body>
 </html>
