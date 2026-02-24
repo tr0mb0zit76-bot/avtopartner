@@ -7,7 +7,5 @@ Route::get('/', function () {
     return view('pages.index');
 });
 
-// Временный роут для кабинета (позже заменим на модуль)
-Route::get('/cabinet', function () {
-    return 'Здесь будет кабинет версии 2.0';
-})->name('cabinet');
+// Подключаем маршруты кабинета
+require base_path('routes/cabinet.php');
