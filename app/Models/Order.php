@@ -41,7 +41,7 @@ class Order extends Model
         'insurance',
         'bonus',
         
-        // Контрагенты (ID)
+        // Контрагенты
         'customer_id',
         'carrier_id',
         'driver_id',
@@ -56,15 +56,7 @@ class Order extends Model
         'status',
         'is_active',
         
-        // Метаданные
-        'metadata',
-        'payment_statuses',
-        
-        // Аудит
-        'created_by',
-        'updated_by',
-        
-        // ПОЛЯ ДЛЯ ОПЛАТЫ (блок "Оплата" из Excel)
+        // Поля для оплаты (из блока "ОПЛАТА")
         'prepayment_customer',
         'prepayment_date',
         'prepayment_status',
@@ -78,12 +70,12 @@ class Order extends Model
         'final_carrier_date',
         'final_carrier_status',
         
-        // ПОЛЯ ДЛЯ КОНТРАГЕНТОВ (контактная информация)
+        // Поля для контактов
         'customer_contact',
         'carrier_contact',
         'driver_phone',
         
-        // ПОЛЯ ДЛЯ ДОКУМЕНТОВ (блок "Документы" из Excel)
+        // Поля для документов
         'track_number_customer',
         'track_status_customer',
         'track_number_carrier',
@@ -95,6 +87,14 @@ class Order extends Model
         'waybill_number',
         'upd_carrier_status',
         'order_carrier_status',
+        
+        // Метаданные
+        'metadata',
+        'payment_statuses',
+        
+        // Аудит
+        'created_by',
+        'updated_by'
     ];
 
     protected $casts = [
@@ -105,7 +105,6 @@ class Order extends Model
         'prepayment_carrier_date' => 'date',
         'final_customer_date' => 'date',
         'final_carrier_date' => 'date',
-        
         'customer_rate' => 'decimal:2',
         'carrier_rate' => 'decimal:2',
         'additional_expenses' => 'decimal:2',
@@ -115,186 +114,205 @@ class Order extends Model
         'prepayment_carrier' => 'decimal:2',
         'final_customer' => 'decimal:2',
         'final_carrier' => 'decimal:2',
-        
         'kpi_percent' => 'decimal:2',
         'delta' => 'decimal:2',
         'salary_accrued' => 'decimal:2',
         'salary_paid' => 'decimal:2',
-        
         'is_active' => 'boolean',
         'metadata' => 'array',
         'payment_statuses' => 'array'
     ];
 
     /**
-     * Связи
+     * Связь с менеджером (пользователем)
      */
     public function manager(): BelongsTo
     {
         return $this->belongsTo(User::class, 'manager_id');
     }
 
+    /**
+     * Связь с сайтом
+     */
     public function site(): BelongsTo
     {
         return $this->belongsTo(Site::class);
     }
 
+    /**
+     * Связь с заказчиком
+     */
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Contractor::class, 'customer_id');
     }
 
+    /**
+     * Связь с перевозчиком
+     */
     public function carrier(): BelongsTo
     {
         return $this->belongsTo(Contractor::class, 'carrier_id');
     }
 
+    /**
+     * Связь с водителем
+     */
     public function driver(): BelongsTo
     {
         return $this->belongsTo(Driver::class);
     }
 
+    /**
+     * Связь с создателем
+     */
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    /**
+     * Связь с редактором
+     */
     public function updatedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'updated_by');
     }
 
     /**
-     * Генерация номера заявки по маске
-     * Для компании «Логистические решения»: ЛР-инициалы менеджера-сквозной номер
-     * Для «Автопартнёр»: АП-инициалы менеджера-сквозной номер
-     * Для «Квест»: КВ-инициалы менеджера-сквозной номер
+     * Генерация номера заявки в зависимости от компании
+     * 
+     * Форматы:
+     * - ЛР: ЛР-Инициалы-Номер (пример: ЛР-ИИ-001)
+     * - АП: АПИнициалыНомер (пример: АПИИ001)
+     * - КВ: Номер-Инициалы-КВ (пример: 001-ИИ-КВ)
      */
-    public static function generateNumber($companyCode, $managerInitials)
+    public static function generateOrderNumber(string $companyCode, int $managerId): string
     {
-        $prefix = match($companyCode) {
-            'ЛР' => 'ЛР',
-            'АП' => 'АП',
-            'КВ' => 'КВ',
-            default => $companyCode
-        };
+        // Получаем менеджера
+        $manager = User::find($managerId);
+        if (!$manager) {
+            return 'ERR-0001';
+        }
         
-        $lastOrder = self::where('company_code', $companyCode)
+        // Получаем инициалы менеджера (первые буквы имени и фамилии)
+        $nameParts = explode(' ', trim($manager->name));
+        $initials = '';
+        foreach ($nameParts as $part) {
+            if (!empty($part)) {
+                $initials .= mb_strtoupper(mb_substr($part, 0, 1));
+            }
+        }
+        
+        // Если инициалов нет, используем ID
+        if (empty($initials)) {
+            $initials = 'XX';
+        }
+        
+        // Получаем счётчик заявок менеджера по этой компании за текущий год
+        $count = self::where('company_code', $companyCode)
+            ->where('manager_id', $managerId)
             ->whereYear('created_at', now()->year)
-            ->orderBy('id', 'desc')
-            ->first();
+            ->count();
         
-        $sequence = $lastOrder ? intval(substr($lastOrder->order_number, -3)) + 1 : 1;
+        // Номер с ведущими нулями (3 знака)
+        $sequence = str_pad($count + 1, 3, '0', STR_PAD_LEFT);
         
-        return sprintf('%s-%s-%03d', $prefix, $managerInitials, $sequence);
+        // Генерация в зависимости от компании
+        return match ($companyCode) {
+            'ЛР' => sprintf('ЛР-%s-%s', $initials, $sequence),
+            'АП' => sprintf('АП%s%s', $initials, $sequence),
+            'КВ' => sprintf('%s-%s-КВ', $sequence, $initials),
+            default => sprintf('%s-%s-%s', $companyCode, $initials, $sequence),
+        };
     }
 
     /**
-     * Расчёт дельты (доход - расходы)
+     * Парсинг номера заявки для получения информации
      */
-    public function calculateDelta(): float
+    public static function parseOrderNumber(string $orderNumber): array
     {
-        $income = $this->customer_rate ?? 0;
-        $expenses = ($this->carrier_rate ?? 0) 
-                  + ($this->additional_expenses ?? 0) 
-                  + ($this->insurance ?? 0) 
-                  + ($this->bonus ?? 0);
+        $result = [
+            'company' => null,
+            'initials' => null,
+            'number' => null,
+            'format' => null
+        ];
         
-        return $income - $expenses;
-    }
-
-    /**
-     * Расчёт KPI (упрощённо, будет заменено на логику из Excel)
-     */
-    public function calculateKpi(): float
-    {
-        $delta = $this->calculateDelta();
-        $income = $this->customer_rate ?? 0;
-        
-        if ($income == 0) {
-            return 0;
+        // Формат ЛР: ЛР-ИИ-001
+        if (preg_match('/^ЛР-([А-Я]{2,3})-(\d{3})$/', $orderNumber, $matches)) {
+            $result['company'] = 'ЛР';
+            $result['initials'] = $matches[1];
+            $result['number'] = $matches[2];
+            $result['format'] = 'lr';
+        }
+        // Формат АП: АПИИ001
+        elseif (preg_match('/^АП([А-Я]{2,3})(\d{3})$/', $orderNumber, $matches)) {
+            $result['company'] = 'АП';
+            $result['initials'] = $matches[1];
+            $result['number'] = $matches[2];
+            $result['format'] = 'ap';
+        }
+        // Формат КВ: 001-ИИ-КВ
+        elseif (preg_match('/^(\d{3})-([А-Я]{2,3})-КВ$/', $orderNumber, $matches)) {
+            $result['company'] = 'КВ';
+            $result['initials'] = $matches[2];
+            $result['number'] = $matches[1];
+            $result['format'] = 'kv';
         }
         
-        return round(($delta / $income) * 100, 2);
+        return $result;
     }
 
     /**
-     * Обновление расчётных полей
+     * Получить инициалы из номера заявки
      */
-    public function refreshCalculatedFields(): void
+    public function getInitialsFromNumber(): ?string
     {
-        $this->delta = $this->calculateDelta();
-        $this->kpi_percent = $this->calculateKpi();
-        $this->salary_accrued = $this->delta * ($this->kpi_percent / 100);
+        $parsed = self::parseOrderNumber($this->order_number);
+        return $parsed['initials'];
+    }
+
+    /**
+     * Получить порядковый номер из номера заявки
+     */
+    public function getSequenceFromNumber(): ?string
+    {
+        $parsed = self::parseOrderNumber($this->order_number);
+        return $parsed['number'];
+    }
+
+    /**
+     * Проверка, принадлежит ли заявка текущему менеджеру
+     */
+    public function isOwnedBy(int $userId): bool
+    {
+        return $this->manager_id === $userId;
+    }
+
+    /**
+     * Получить следующий номер для менеджера (без сохранения)
+     */
+    public static function previewNextNumber(string $companyCode, int $managerId): string
+    {
+        return self::generateOrderNumber($companyCode, $managerId);
+    }
+
+    /**
+     * Переопределяем метод save для автоматической генерации номера при создании
+     */
+    public static function boot()
+    {
+        parent::boot();
         
-        $this->saveQuietly();
-    }
-
-    /**
-     * Скоупы для фильтрации
-     */
-    public function scopeActive($query)
-    {
-        return $query->where('is_active', true);
-    }
-
-    public function scopeByManager($query, $managerId)
-    {
-        return $query->where('manager_id', $managerId);
-    }
-
-    public function scopeByCompany($query, $companyCode)
-    {
-        return $query->where('company_code', $companyCode);
-    }
-
-    public function scopeByDateRange($query, $startDate, $endDate)
-    {
-        return $query->whereBetween('order_date', [$startDate, $endDate]);
-    }
-
-    public function scopeByStatus($query, $status)
-    {
-        return $query->where('status', $status);
-    }
-
-    /**
-     * Аксессоры для удобного доступа к данным
-     */
-    public function getCustomerNameAttribute()
-    {
-        return $this->customer->name ?? $this->attributes['customer_name'] ?? '';
-    }
-
-    public function getCarrierNameAttribute()
-    {
-        return $this->carrier->name ?? $this->attributes['carrier_name'] ?? '';
-    }
-
-    public function getDriverFullNameAttribute()
-    {
-        return $this->driver->full_name ?? $this->attributes['driver_name'] ?? '';
-    }
-
-    public function getTotalExpensesAttribute(): float
-    {
-        return ($this->carrier_rate ?? 0) 
-             + ($this->additional_expenses ?? 0) 
-             + ($this->insurance ?? 0) 
-             + ($this->bonus ?? 0);
-    }
-
-    public function getProfitAttribute(): float
-    {
-        return ($this->customer_rate ?? 0) - $this->total_expenses;
-    }
-
-    public function getProfitMarginAttribute(): float
-    {
-        $income = $this->customer_rate ?? 0;
-        if ($income == 0) {
-            return 0;
-        }
-        return round(($this->profit / $income) * 100, 2);
+        static::creating(function ($order) {
+            // Если номер не задан, генерируем автоматически
+            if (empty($order->order_number)) {
+                $order->order_number = self::generateOrderNumber(
+                    $order->company_code ?? 'ЛР',
+                    $order->manager_id ?? auth()->id()
+                );
+            }
+        });
     }
 }

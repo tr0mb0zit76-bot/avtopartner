@@ -183,7 +183,7 @@
     <!-- СООБЩЕНИЯ -->
     <div class="messages-container">
         <div class="chat-messages" id="chatMessages">
-            <div class="message bot">👋 Здравствуйте! Я цифровой диспетчер. Чем могу помочь?</div>
+            <div class="message bot">👋 Задайте вопрос цифровому диспетчеру</div>
         </div>
     </div>
 @endsection

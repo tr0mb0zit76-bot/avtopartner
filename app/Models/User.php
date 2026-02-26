@@ -114,18 +114,70 @@ class User extends Authenticatable
     /**
      * Check if user has a specific permission.
      */
-    public function canDo(string $permission): bool
+    public function hasPermission(string $permission): bool
     {
         if (!$this->role) {
             return false;
         }
         
-        // Admin can do everything
+        // Получаем права роли
+        $permissions = $this->role->permissions;
+        
+        // Если прав нет
+        if (empty($permissions)) {
+            return false;
+        }
+        
+        // Декодируем JSON
+        if (is_string($permissions)) {
+            $permissions = json_decode($permissions, true);
+        }
+        
+        // Если не массив или пусто
+        if (!is_array($permissions) || empty($permissions)) {
+            return false;
+        }
+        
+        // Если есть '*' (все права)
+        if (in_array('*', $permissions)) {
+            return true;
+        }
+        
+        // Проверяем конкретное право
+        return in_array($permission, $permissions);
+    }
+
+    /**
+     * Check if user can do action on specific order.
+     */
+    public function canAccessOrder(Order $order): bool
+    {
+        // Админ может всё
         if ($this->isAdmin()) {
             return true;
         }
         
-        return $this->role->hasPermission($permission);
+        // Руководитель может всё
+        if ($this->isSupervisor()) {
+            return true;
+        }
+        
+        // Менеджер только свои заявки
+        if ($this->isManager()) {
+            return $order->manager_id === $this->id;
+        }
+        
+        // Бухгалтер может всё (финансы)
+        if ($this->isAccountant()) {
+            return true;
+        }
+        
+        // Диспетчер может всё (распределение)
+        if ($this->isDispatcher()) {
+            return true;
+        }
+        
+        return false;
     }
 
     /**
@@ -151,6 +203,17 @@ class User extends Authenticatable
     {
         return $query->whereHas('role', function ($q) use ($roleName) {
             $q->where('name', $roleName);
+        });
+    }
+
+    /**
+     * Get users with specific permission.
+     */
+    public function scopeWithPermission($query, string $permission)
+    {
+        return $query->whereHas('role', function ($q) use ($permission) {
+            $q->whereJsonContains('permissions', $permission)
+              ->orWhereJsonContains('permissions', '*');
         });
     }
 }

@@ -41,22 +41,22 @@
                     <td>{{ $user->site->name ?? 'Все' }}</td>
                     <td>
                         @if($user->is_active)
-                            <span class="badge badge-active">Активен</span>
+                            <span class="badge-active">Активен</span>
                         @else
-                            <span class="badge badge-inactive">Неактивен</span>
+                            <span class="badge-inactive">Неактивен</span>
                         @endif
                     </td>
                     <td class="actions">
                         @if(auth()->user()->isAdmin())
-                            <a href="{{ route('cabinet.users.edit', $user) }}" class="btn-action btn-edit" title="Редактировать">
+                            <a href="{{ route('cabinet.users.edit', $user) }}" class="btn-edit" title="Редактировать">
                                 ✏️
                             </a>
                             @if(auth()->id() !== $user->id)
                                 <form method="POST" action="{{ route('cabinet.users.destroy', $user) }}" style="display:inline">
                                     @csrf
                                     @method('DELETE')
-                                    <button type="submit" class="btn-action btn-delete" title="Удалить" onclick="return confirm('Удалить пользователя {{ $user->name }}?')">
-                                        ������️
+                                    <button type="submit" class="btn-delete" title="Удалить" onclick="return confirm('Удалить пользователя {{ $user->name }}?')">
+                                        🗑️
                                     </button>
                                 </form>
                             @endif

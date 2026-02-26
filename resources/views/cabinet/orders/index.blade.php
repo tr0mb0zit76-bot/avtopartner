@@ -3,6 +3,21 @@
 @section('title', 'Заявки')
 
 @section('content')
+<!-- Подменю модуля заявок -->
+<div class="module-submenu">
+    <a href="{{ route('cabinet.orders.index') }}" class="submenu-item {{ request()->routeIs('cabinet.orders.index') ? 'active' : '' }}">
+        📋 Все заявки
+    </a>
+    @if(auth()->user()->hasPermission('orders.view_all'))
+        <a href="#" class="submenu-item" onclick="alert('В разработке')">
+            📊 Сводный реестр
+        </a>
+    @endif
+    <a href="#" class="submenu-item" onclick="alert('В разработке')">
+        📅 Календарь оплат
+    </a>
+</div>
+
 <div class="orders-header">
     <h1>Заявки</h1>
     <div class="orders-actions">
@@ -30,7 +45,7 @@
 </div>
 
 <div class="orders-table-container">
-    <div id="orders-handsontable" style="width: 100%; height: 600px; overflow: auto;"></div>
+    <div id="orders-handsontable" style="width: 100%; height: 100%;"></div>
 </div>
 
 @push('scripts')
@@ -39,7 +54,6 @@
     let ordersData = @json($orders ?? []);
     
     document.addEventListener('DOMContentLoaded', function() {
-        // Подключаем Handsontable после загрузки страницы
         setTimeout(initHandsontable, 100);
     });
     
@@ -56,11 +70,14 @@
             rowHeaders: true,
             colHeaders: true,
             height: '100%',
+            width: '100%',
             licenseKey: 'non-commercial-and-evaluation',
+            stretchH: 'none',
+            autoWrapRow: true,
+            autoWrapCol: true,
             
-            // Настройка колонок
             columns: [
-                // Заявка (ID, компания, менеджер, дата)
+                // Заявка
                 { data: 'order_number', title: 'ID', readOnly: true },
                 { data: 'company_code', title: 'Наша компания', type: 'dropdown', source: ['ЛР', 'АП', 'КВ'] },
                 { data: 'manager_name', title: 'Менеджер', readOnly: true },
@@ -76,35 +93,35 @@
                 // Финансы заказчика
                 { data: 'customer_rate', title: 'Ставка заказчика', type: 'numeric', numericFormat: { pattern: '0,0.00' } },
                 { data: 'customer_payment_form', title: 'Форма оплаты (зак)', type: 'dropdown', source: ['с НДС', 'без НДС'] },
-                { data: 'customer_payment_term', title: 'Условия оплаты (зак)', type: 'dropdown', source: ['5 оттн', '7 оттн', '3 фттн', '5 фттн', '50/50', '2 бд', '5 бд'] },
+                { data: 'customer_payment_term', title: 'Условия оплаты (зак)' }, // Убрали dropdown, теперь текстовое поле
                 
                 // Финансы перевозчика
                 { data: 'carrier_rate', title: 'Ставка перевозчика', type: 'numeric', numericFormat: { pattern: '0,0.00' } },
                 { data: 'carrier_payment_form', title: 'Форма оплаты (пер)', type: 'dropdown', source: ['с НДС', 'без НДС'] },
-                { data: 'carrier_payment_term', title: 'Условия оплаты (пер)', type: 'dropdown', source: ['5 оттн', '7 оттн', '3 фттн', '5 фттн', '50/50', '2 бд', '5 бд'] },
+                { data: 'carrier_payment_term', title: 'Условия оплаты (пер)' }, // Убрали dropdown, теперь текстовое поле
                 
                 // Расходы
                 { data: 'additional_expenses', title: 'Доп расходы', type: 'numeric', numericFormat: { pattern: '0,0.00' } },
                 { data: 'insurance', title: 'Страховка', type: 'numeric', numericFormat: { pattern: '0,0.00' } },
                 { data: 'bonus', title: 'Бонус', type: 'numeric', numericFormat: { pattern: '0,0.00' } },
                 
-                // KPI и дельта (расчётные)
+                // KPI и дельта
                 { data: 'kpi_percent', title: 'KPI %', type: 'numeric', numericFormat: { pattern: '0.00' }, readOnly: true },
                 { data: 'delta', title: 'Дельта', type: 'numeric', numericFormat: { pattern: '0,0.00' }, readOnly: true },
                 
                 // ОПЛАТА
                 { data: 'prepayment_customer', title: 'Предоплата заказчик', type: 'numeric', numericFormat: { pattern: '0,0.00' } },
                 { data: 'prepayment_date', title: 'Дата предоплаты', type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true },
-                { data: 'prepayment_status', title: 'Статус предоплаты', type: 'dropdown', source: ['ожидается', 'получена', 'просрочена'] },
+                { data: 'prepayment_status', title: 'Статус предоплаты' },
                 { data: 'prepayment_carrier', title: 'Предоплата перевозчик', type: 'numeric', numericFormat: { pattern: '0,0.00' } },
                 { data: 'prepayment_carrier_date', title: 'Дата предоплаты (пер)', type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true },
-                { data: 'prepayment_carrier_status', title: 'Статус предоплаты (пер)', type: 'dropdown', source: ['ожидается', 'оплачена', 'просрочена'] },
+                { data: 'prepayment_carrier_status', title: 'Статус предоплаты (пер)' },
                 { data: 'final_customer', title: 'Окончательный расчёт (зак)', type: 'numeric', numericFormat: { pattern: '0,0.00' } },
                 { data: 'final_customer_date', title: 'Дата окончательного расчёта', type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true },
-                { data: 'final_customer_status', title: 'Статус окончательного расчёта', type: 'dropdown', source: ['ожидается', 'получен', 'просрочен'] },
+                { data: 'final_customer_status', title: 'Статус окончательного расчёта' },
                 { data: 'final_carrier', title: 'Окончательный расчёт (пер)', type: 'numeric', numericFormat: { pattern: '0,0.00' } },
                 { data: 'final_carrier_date', title: 'Дата окончательного расчёта (пер)', type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true },
-                { data: 'final_carrier_status', title: 'Статус окончательного расчёта (пер)', type: 'dropdown', source: ['ожидается', 'оплачен', 'просрочен'] },
+                { data: 'final_carrier_status', title: 'Статус окончательного расчёта (пер)' },
                 
                 // Контрагенты
                 { data: 'customer_name', title: 'Заказчик' },
@@ -118,21 +135,20 @@
                 { data: 'salary_accrued', title: 'Начислено', type: 'numeric', numericFormat: { pattern: '0,0.00' }, readOnly: true },
                 { data: 'salary_paid', title: 'Выплачено', type: 'numeric', numericFormat: { pattern: '0,0.00' } },
                 
-                // Документы
-                { data: 'track_number_customer', title: 'Трэк-номер заказчика' },
-                { data: 'track_status_customer', title: 'Статус трэка (зак)' },
-                { data: 'track_number_carrier', title: 'Трэк-номер перевозчика' },
-                { data: 'track_status_carrier', title: 'Статус трэка (пер)' },
+                // Документы - теперь все текстовые поля для ссылок
+                { data: 'track_number_customer', title: 'Трэк-номер заказ' },
+                { data: 'track_status_customer', title: 'Статус' },
+                { data: 'track_number_carrier', title: 'Трэк-номер перевоз' },
+                { data: 'track_status_carrier', title: 'Статус' },
                 { data: 'invoice_number', title: '№ счёта' },
                 { data: 'upd_number', title: '№ УПД' },
-                { data: 'upd_customer_status', title: 'УПД заказчик' },
-                { data: 'order_customer_status', title: 'Заявка заказчик' },
-                { data: 'waybill_number', title: 'ТН' },
-                { data: 'upd_carrier_status', title: 'УПД перевозчик' },
-                { data: 'order_carrier_status', title: 'Заявка перевозчик' }
+                { data: 'upd_customer_status', title: 'УПД заказчик' }, // Для ссылок на Яндекс.Диск
+                { data: 'order_customer_status', title: 'Заявка заказчик' }, // Для ссылок на Яндекс.Диск
+                { data: 'waybill_number', title: 'ТН' }, // Для ссылок на Яндекс.Диск
+                { data: 'upd_carrier_status', title: 'УПД перевозчик' }, // Для ссылок на Яндекс.Диск
+                { data: 'order_carrier_status', title: 'Заявка перевозчик' } // Для ссылок на Яндекс.Диск
             ],
             
-            // Настройка вложенных заголовков
             nestedHeaders: [
                 [
                     { label: 'ЗАЯВКА', colspan: 4 },
@@ -160,47 +176,54 @@
                 ]
             ],
             
-            // Контекстное меню
             contextMenu: {
                 items: {
-                    'row_above': {
-                        name: 'Вставить строку выше'
-                    },
-                    'row_below': {
-                        name: 'Вставить строку ниже'
-                    },
+                    'row_above': { name: 'Вставить строку выше' },
+                    'row_below': { name: 'Вставить строку ниже' },
                     'remove_row': {
-                        name: 'Удалить строку'
+                        name: 'Удалить строку',
+                        callback: function(key, selection, clickEvent) {
+                            const rows = selection[0].start.row;
+                            const rowData = hot.getSourceDataAtRow(rows);
+                            
+                            if (confirm(`Удалить заявку ${rowData.order_number}?`)) {
+                                if (rowData.id) {
+                                    fetch(`/cabinet/orders/${rowData.id}`, {
+                                        method: 'DELETE',
+                                        headers: {
+                                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                                        }
+                                    })
+                                    .then(response => response.json())
+                                    .then(data => {
+                                        if (data.success) {
+                                            hot.alter('remove_row', rows, 1);
+                                            showNotification('Заявка удалена', 'success');
+                                        }
+                                    });
+                                } else {
+                                    hot.alter('remove_row', rows, 1);
+                                }
+                            }
+                        }
                     },
                     'separator': Handsontable.plugins.ContextMenu.SEPARATOR,
-                    'copy': {
-                        name: 'Копировать'
-                    },
-                    'cut': {
-                        name: 'Вырезать'
-                    },
-                    'paste': {
-                        name: 'Вставить'
-                    }
+                    'copy': { name: 'Копировать' },
+                    'cut': { name: 'Вырезать' },
+                    'paste': { name: 'Вставить' }
                 }
             },
             
-            // После изменения ячейки
             afterChange: function(changes, source) {
                 if (source === 'edit' && changes) {
                     const rowIndex = changes[0][0];
-                    
-                    // Пересчитываем KPI и дельту
                     calculateKPI(rowIndex);
-                    
-                    // Сохраняем изменения
                     saveRow(rowIndex);
                 }
             }
         });
     }
     
-    // Функция расчёта KPI и дельты
     function calculateKPI(rowIndex) {
         const rowData = hot.getSourceDataAtRow(rowIndex);
         
@@ -212,12 +235,9 @@
         
         const totalExpenses = carrierRate + additional + insurance + bonus;
         const delta = customerRate - totalExpenses;
-        
-        // Расчёт KPI (временно 5%, потом будет из настроек)
         const kpiPercent = 5;
         const salaryAccrued = delta * (kpiPercent / 100);
         
-        // Обновляем данные
         const updatedData = {
             ...rowData,
             delta: delta,
@@ -228,7 +248,6 @@
         hot.setSourceDataAtRow(rowIndex, updatedData);
     }
     
-    // Функция сохранения строки
     function saveRow(rowIndex) {
         const rowData = hot.getSourceDataAtRow(rowIndex);
         
@@ -243,10 +262,7 @@
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                // Показываем уведомление о сохранении
                 showNotification('Сохранено', 'success');
-            } else {
-                showNotification('Ошибка сохранения', 'error');
             }
         })
         .catch(error => {
@@ -255,36 +271,44 @@
         });
     }
     
-    // Функция создания новой заявки
     function createNewOrder() {
-        const newRow = {
-            order_number: 'НОВАЯ-' + Date.now().toString().slice(-4),
-            company_code: 'ЛР',
-            order_date: new Date().toISOString().split('T')[0],
-            additional_expenses: 0,
-            insurance: 0,
-            bonus: 0,
-            customer_rate: 0,
-            carrier_rate: 0,
-            delta: 0,
-            kpi_percent: 0,
-            salary_accrued: 0,
-            salary_paid: 0
-        };
-        
-        // Добавляем новую строку в начало
-        const currentData = hot.getSourceData();
-        currentData.unshift(newRow);
-        hot.loadData(currentData);
-        
-        // Прокручиваем к новой строке
-        hot.selectCell(0, 0);
-        
-        // Показываем уведомление
-        showNotification('Новая заявка создана', 'success');
+        fetch('/cabinet/orders/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+            },
+            body: JSON.stringify({ company_code: 'ЛР' })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const newRow = {
+                    order_number: data.order.order_number,
+                    company_code: 'ЛР',
+                    manager_name: '{{ auth()->user()->name }}',
+                    order_date: new Date().toISOString().split('T')[0],
+                    additional_expenses: 0,
+                    insurance: 0,
+                    bonus: 0,
+                    customer_rate: 0,
+                    carrier_rate: 0,
+                    delta: 0,
+                    kpi_percent: 0,
+                    salary_accrued: 0,
+                    salary_paid: 0
+                };
+                
+                const currentData = hot.getSourceData();
+                currentData.unshift(newRow);
+                hot.loadData(currentData);
+                hot.selectCell(0, 0);
+                
+                showNotification('Новая заявка создана: ' + data.order.order_number, 'success');
+            }
+        });
     }
     
-    // Функция применения фильтров
     function applyFilters() {
         const dateFrom = document.getElementById('filterDateFrom').value;
         const dateTo = document.getElementById('filterDateTo').value;
@@ -305,28 +329,21 @@
             });
     }
     
-    // Функция экспорта в Excel
     function exportToExcel() {
         const data = hot.getSourceData();
         const headers = hot.getColHeader();
         
-        // Создаём CSV
         let csv = headers.join(';') + '\n';
         data.forEach(row => {
-            const rowArray = [];
-            for (let key in row) {
-                if (row.hasOwnProperty(key)) {
-                    let value = row[key];
-                    if (value && typeof value === 'string' && value.includes(';')) {
-                        value = `"${value}"`;
-                    }
-                    rowArray.push(value || '');
+            const values = Object.values(row).map(val => {
+                if (val && typeof val === 'string' && val.includes(';')) {
+                    return `"${val}"`;
                 }
-            }
-            csv += rowArray.join(';') + '\n';
+                return val || '';
+            });
+            csv += values.join(';') + '\n';
         });
         
-        // Скачиваем файл
         const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
@@ -336,9 +353,7 @@
         showNotification('Экспорт завершён', 'success');
     }
     
-    // Функция показа уведомлений
     function showNotification(message, type) {
-        // Создаём элемент уведомления
         const notification = document.createElement('div');
         notification.className = `notification notification-${type}`;
         notification.textContent = message;
@@ -356,16 +371,16 @@
         
         document.body.appendChild(notification);
         
-        // Удаляем через 3 секунды
         setTimeout(() => {
             notification.style.animation = 'slideOut 0.3s ease';
             setTimeout(() => {
-                document.body.removeChild(notification);
+                if (document.body.contains(notification)) {
+                    document.body.removeChild(notification);
+                }
             }, 300);
         }, 3000);
     }
     
-    // Добавляем стили для анимации
     const style = document.createElement('style');
     style.textContent = `
         @keyframes slideIn {
@@ -380,3 +395,4 @@
     document.head.appendChild(style);
 </script>
 @endpush
+@endsection

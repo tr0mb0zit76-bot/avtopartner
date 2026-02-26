@@ -4,12 +4,9 @@
 
 @section('content')
 <div class="dashboard">
-    <h1>Добро пожаловать в кабинет!</h1>
+    <h1>Добро пожаловать, {{ auth()->user()->name }}!</h1>
     <p>Вы успешно вошли в систему.</p>
     
-    <form method="POST" action="{{ route('cabinet.logout') }}">
-        @csrf
-        <button type="submit" class="btn-logout">Выйти</button>
-    </form>
+    <!-- Здесь будет контент дашборда -->
 </div>
 @endsection

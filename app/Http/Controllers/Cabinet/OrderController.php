@@ -5,8 +5,6 @@ namespace App\Http\Controllers\Cabinet;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\User;
-use App\Models\Contractor;
-use App\Models\Driver;
 use Illuminate\Http\Request;
 
 class OrderController extends Controller
@@ -29,7 +27,7 @@ class OrderController extends Controller
         // Преобразуем данные для Handsontable со ВСЕМИ полями
         $ordersData = $orders->map(function($order) {
             return [
-                // Заявка (ID, компания, менеджер, дата)
+                'id' => $order->id,
                 'order_number' => $order->order_number,
                 'company_code' => $order->company_code,
                 'manager_name' => $order->manager->name ?? '',
@@ -116,8 +114,11 @@ class OrderController extends Controller
         $data = $request->input('data');
         
         try {
-            // Ищем заявку по номеру
-            $order = Order::where('order_number', $data['order_number'] ?? '')->first();
+            // Ищем заявку по номеру или ID
+            $order = null;
+            if (isset($data['id'])) {
+                $order = Order::find($data['id']);
+            }
             
             if ($order) {
                 // Обновляем существующую
@@ -125,6 +126,8 @@ class OrderController extends Controller
             } else {
                 // Создаём новую
                 $data['order_number'] = $data['order_number'] ?? $this->generateOrderNumber();
+                $data['manager_id'] = auth()->id();
+                $data['site_id'] = session('current_site')->id ?? 1;
                 $data['created_by'] = auth()->id();
                 Order::create($this->prepareData($data));
             }
@@ -159,6 +162,7 @@ class OrderController extends Controller
         
         $ordersData = $orders->map(function($order) {
             return [
+                'id' => $order->id,
                 'order_number' => $order->order_number,
                 'company_code' => $order->company_code,
                 'manager_name' => $order->manager->name ?? '',
@@ -223,7 +227,10 @@ class OrderController extends Controller
     {
         try {
             $order = new Order();
-            $order->order_number = $this->generateOrderNumber();
+            $order->order_number = Order::generateOrderNumber(
+                $request->company_code ?? 'ЛР',
+                auth()->id()
+            );
             $order->company_code = $request->company_code ?? 'ЛР';
             $order->manager_id = auth()->id();
             $order->site_id = session('current_site')->id ?? 1;
@@ -236,7 +243,16 @@ class OrderController extends Controller
             $order->created_by = auth()->id();
             $order->save();
             
-            return response()->json(['success' => true, 'order' => $order]);
+            return response()->json([
+                'success' => true, 
+                'order' => [
+                    'id' => $order->id,
+                    'order_number' => $order->order_number,
+                    'company_code' => $order->company_code,
+                    'manager_name' => auth()->user()->name,
+                    'order_date' => $order->order_date->format('Y-m-d'),
+                ]
+            ]);
         } catch (\Exception $e) {
             return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
         }
@@ -261,6 +277,11 @@ class OrderController extends Controller
     public function destroy(Order $order)
     {
         try {
+            // Проверка прав
+            if (!auth()->user()->isAdmin() && !auth()->user()->isSupervisor()) {
+                return response()->json(['success' => false, 'error' => 'Нет прав для удаления'], 403);
+            }
+            
             $order->delete();
             return response()->json(['success' => true]);
         } catch (\Exception $e) {
@@ -276,8 +297,11 @@ class OrderController extends Controller
         // Убираем поля, которых нет в таблице
         $fillable = (new Order())->getFillable();
         
+        // Добавляем updated_by
+        $data['updated_by'] = auth()->id();
+        
         return array_filter($data, function($key) use ($fillable) {
-            return in_array($key, $fillable);
+            return in_array($key, $fillable) || $key === 'updated_by';
         }, ARRAY_FILTER_USE_KEY);
     }
     
