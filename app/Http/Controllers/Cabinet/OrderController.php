@@ -5,61 +5,77 @@ namespace App\Http\Controllers\Cabinet;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\User;
+use App\Services\KPI\KpiService;
+use App\Services\KPI\PeriodCalculator;
+use App\Services\KPI\StatusCalculator;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class OrderController extends Controller
 {
-    /**
-     * Display a listing of the orders.
-     */
+    protected KpiService $kpiService;
+    protected PeriodCalculator $periodCalculator;
+    protected StatusCalculator $statusCalculator;
+    
+    public function __construct()
+    {
+        $this->kpiService = new KpiService();
+        $this->periodCalculator = new PeriodCalculator();
+        $this->statusCalculator = new StatusCalculator();
+    }
+    
     public function index()
     {
-        // Получаем все заявки с связанными данными
-        $orders = Order::with(['manager', 'customer', 'carrier', 'driver'])
-            ->orderBy('created_at', 'desc')
-            ->get();
+        $user = auth()->user();
+        $isAdminOrSupervisor = $user->isAdmin() || $user->isSupervisor();
         
-        // Получаем менеджеров для фильтра
-        $managers = User::whereHas('role', function($q) {
-            $q->whereIn('name', ['manager', 'admin', 'supervisor']);
-        })->get();
+        if ($isAdminOrSupervisor || $user->isDispatcher()) {
+            $orders = Order::with(['manager', 'customer', 'carrier', 'driver'])
+                ->orderBy('created_at', 'desc')
+                ->get();
+        } else {
+            $orders = Order::with(['manager', 'customer', 'carrier', 'driver'])
+                ->where('manager_id', $user->id)
+                ->orderBy('created_at', 'desc')
+                ->get();
+        }
         
-        // Преобразуем данные для Handsontable со ВСЕМИ полями
+        $managers = [];
+        if ($isAdminOrSupervisor || $user->isDispatcher()) {
+            $managers = User::whereHas('role', function($q) {
+                $q->whereIn('name', ['manager', 'admin', 'supervisor']);
+            })->get();
+        }
+        
         $ordersData = $orders->map(function($order) {
+            $status = $this->statusCalculator->calculate($order);
+            
             return [
                 'id' => $order->id,
                 'order_number' => $order->order_number,
+                'status_icon' => $status['icon'],
+                'status_code' => $status['code'],
+                'status_label' => $status['label'],
                 'company_code' => $order->company_code,
                 'manager_name' => $order->manager->name ?? '',
+                'manager_id' => $order->manager_id,
                 'order_date' => $order->order_date?->format('Y-m-d'),
-                
-                // Маршрут / груз
                 'loading_point' => $order->loading_point,
                 'unloading_point' => $order->unloading_point,
                 'cargo_description' => $order->cargo_description,
                 'loading_date' => $order->loading_date?->format('Y-m-d'),
                 'unloading_date' => $order->unloading_date?->format('Y-m-d'),
-                
-                // Финансы заказчика
                 'customer_rate' => $order->customer_rate,
                 'customer_payment_form' => $order->customer_payment_form,
                 'customer_payment_term' => $order->customer_payment_term,
-                
-                // Финансы перевозчика
                 'carrier_rate' => $order->carrier_rate,
                 'carrier_payment_form' => $order->carrier_payment_form,
                 'carrier_payment_term' => $order->carrier_payment_term,
-                
-                // Расходы
                 'additional_expenses' => $order->additional_expenses,
                 'insurance' => $order->insurance,
                 'bonus' => $order->bonus,
-                
-                // KPI и дельта
                 'kpi_percent' => $order->kpi_percent,
                 'delta' => $order->delta,
-                
-                // ОПЛАТА - блок как в Excel
                 'prepayment_customer' => $order->prepayment_customer,
                 'prepayment_date' => $order->prepayment_date?->format('Y-m-d'),
                 'prepayment_status' => $order->prepayment_status,
@@ -72,24 +88,18 @@ class OrderController extends Controller
                 'final_carrier' => $order->final_carrier,
                 'final_carrier_date' => $order->final_carrier_date?->format('Y-m-d'),
                 'final_carrier_status' => $order->final_carrier_status,
-                
-                // Контрагенты
                 'customer_name' => $order->customer->name ?? '',
                 'customer_contact' => $order->customer_contact,
                 'carrier_name' => $order->carrier->name ?? '',
                 'carrier_contact' => $order->carrier_contact,
                 'driver_name' => $order->driver->full_name ?? '',
                 'driver_phone' => $order->driver_phone,
-                
-                // Зарплата
                 'salary_accrued' => $order->salary_accrued,
                 'salary_paid' => $order->salary_paid,
-                
-                // Документы
                 'track_number_customer' => $order->track_number_customer,
-                'track_status_customer' => $order->track_status_customer,
+                'doc_received_date_customer' => $order->doc_received_date_customer?->format('Y-m-d'),
                 'track_number_carrier' => $order->track_number_carrier,
-                'track_status_carrier' => $order->track_status_carrier,
+                'doc_received_date_carrier' => $order->doc_received_date_carrier?->format('Y-m-d'),
                 'invoice_number' => $order->invoice_number,
                 'upd_number' => $order->upd_number,
                 'upd_customer_status' => $order->upd_customer_status,
@@ -102,48 +112,104 @@ class OrderController extends Controller
         
         return view('cabinet.orders.index', [
             'orders' => $ordersData,
-            'managers' => $managers
+            'managers' => $managers,
+            'isAdminOrSupervisor' => $isAdminOrSupervisor
         ]);
     }
     
-    /**
-     * Save order data from Handsontable.
-     */
     public function save(Request $request)
     {
         $data = $request->input('data');
         
+        if (!$data) {
+            return response()->json(['success' => false, 'error' => 'Нет данных'], 400);
+        }
+        
         try {
-            // Ищем заявку по номеру или ID
             $order = null;
-            if (isset($data['id'])) {
+            if (isset($data['id']) && $data['id']) {
                 $order = Order::find($data['id']);
             }
             
-            if ($order) {
-                // Обновляем существующую
-                $order->update($this->prepareData($data));
-            } else {
-                // Создаём новую
-                $data['order_number'] = $data['order_number'] ?? $this->generateOrderNumber();
-                $data['manager_id'] = auth()->id();
-                $data['site_id'] = session('current_site')->id ?? 1;
-                $data['created_by'] = auth()->id();
-                Order::create($this->prepareData($data));
+            // Подготавливаем данные для сохранения
+            $prepareData = [];
+            $fillable = (new Order())->getFillable();
+            
+            foreach ($fillable as $field) {
+                if (isset($data[$field])) {
+                    $prepareData[$field] = $data[$field];
+                }
             }
             
-            return response()->json(['success' => true]);
+            // Добавляем updated_by
+            $prepareData['updated_by'] = auth()->id();
+            
+            if ($order) {
+                // Обновляем существующую заявку
+                $order->update($prepareData);
+            } else {
+                // Создаём новую заявку
+                $prepareData['order_number'] = $data['order_number'] ?? null;
+                $prepareData['manager_id'] = auth()->id();
+                $prepareData['site_id'] = session('current_site')->id ?? 1;
+                $prepareData['created_by'] = auth()->id();
+                $order = Order::create($prepareData);
+            }
+            
+            // Проверяем, изменились ли критичные для KPI поля
+            if (!empty($data['customer_payment_form']) && !empty($data['carrier_payment_form'])) {
+                $this->kpiService->recalculateManagerPeriod(
+                    $order->manager_id,
+                    $order->order_date
+                );
+                
+                // Получаем обновлённую заявку
+                $order = $order->fresh();
+            }
+            
+            // Получаем актуальный статус
+            $status = $this->statusCalculator->calculate($order);
+            
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'id' => $order->id,
+                    'order_number' => $order->order_number,
+                    'status_icon' => $status['icon'],
+                    'status_code' => $status['code'],
+                    'company_code' => $order->company_code,
+                    'manager_name' => $order->manager->name ?? '',
+                    'order_date' => $order->order_date?->format('Y-m-d'),
+                    'delta' => $order->delta,
+                    'kpi_percent' => $order->kpi_percent,
+                    'salary_accrued' => $order->salary_accrued,
+                ]
+            ]);
+            
         } catch (\Exception $e) {
-            return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
+            Log::error('Order save error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'data' => $data
+            ]);
+            
+            return response()->json([
+                'success' => false, 
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
     
-    /**
-     * Filter orders.
-     */
     public function filter(Request $request)
     {
+        $user = auth()->user();
+        $isAdminOrSupervisor = $user->isAdmin() || $user->isSupervisor();
+        $isDispatcher = $user->isDispatcher();
+        
         $query = Order::with(['manager', 'customer', 'carrier', 'driver']);
+        
+        if (!$isAdminOrSupervisor && !$isDispatcher) {
+            $query->where('manager_id', $user->id);
+        }
         
         if ($request->date_from) {
             $query->whereDate('order_date', '>=', $request->date_from);
@@ -152,20 +218,63 @@ class OrderController extends Controller
             $query->whereDate('order_date', '<=', $request->date_to);
         }
         if ($request->status) {
-            $query->where('status', $request->status);
+            $status = $request->status;
+            
+            if ($status === 'new') {
+                $query->whereNull('loading_date');
+            } elseif ($status === 'in_progress') {
+                $query->whereNotNull('loading_date')->whereNull('unloading_date');
+            } elseif ($status === 'documents') {
+                $query->whereNotNull('unloading_date')
+                      ->where(function($q) {
+                          $q->whereNull('upd_customer_status')
+                            ->orWhereNull('order_customer_status')
+                            ->orWhereNull('waybill_number')
+                            ->orWhereNull('upd_carrier_status')
+                            ->orWhereNull('order_carrier_status');
+                      });
+            } elseif ($status === 'payment') {
+                $query->whereNotNull('upd_customer_status')
+                      ->whereNotNull('order_customer_status')
+                      ->whereNotNull('waybill_number')
+                      ->whereNotNull('upd_carrier_status')
+                      ->whereNotNull('order_carrier_status')
+                      ->where(function($q) {
+                          $q->where('final_customer', '<=', 0)
+                            ->where('prepayment_customer', '<=', 0)
+                            ->orWhere('salary_paid', '<=', 0);
+                      });
+            } elseif ($status === 'completed') {
+                $query->whereNotNull('unloading_date')
+                      ->whereNotNull('upd_customer_status')
+                      ->whereNotNull('order_customer_status')
+                      ->whereNotNull('waybill_number')
+                      ->whereNotNull('upd_carrier_status')
+                      ->whereNotNull('order_carrier_status')
+                      ->where('final_customer', '>', 0)
+                      ->orWhere('prepayment_customer', '>', 0)
+                      ->where('salary_paid', '>', 0);
+            }
         }
-        if ($request->manager) {
+        
+        if (($isAdminOrSupervisor || $isDispatcher) && $request->manager) {
             $query->where('manager_id', $request->manager);
         }
         
         $orders = $query->orderBy('created_at', 'desc')->get();
         
         $ordersData = $orders->map(function($order) {
+            $status = $this->statusCalculator->calculate($order);
+            
             return [
                 'id' => $order->id,
                 'order_number' => $order->order_number,
+                'status_icon' => $status['icon'],
+                'status_code' => $status['code'],
+                'status_label' => $status['label'],
                 'company_code' => $order->company_code,
                 'manager_name' => $order->manager->name ?? '',
+                'manager_id' => $order->manager_id,
                 'order_date' => $order->order_date?->format('Y-m-d'),
                 'loading_point' => $order->loading_point,
                 'unloading_point' => $order->unloading_point,
@@ -204,9 +313,9 @@ class OrderController extends Controller
                 'salary_accrued' => $order->salary_accrued,
                 'salary_paid' => $order->salary_paid,
                 'track_number_customer' => $order->track_number_customer,
-                'track_status_customer' => $order->track_status_customer,
+                'doc_received_date_customer' => $order->doc_received_date_customer?->format('Y-m-d'),
                 'track_number_carrier' => $order->track_number_carrier,
-                'track_status_carrier' => $order->track_status_carrier,
+                'doc_received_date_carrier' => $order->doc_received_date_carrier?->format('Y-m-d'),
                 'invoice_number' => $order->invoice_number,
                 'upd_number' => $order->upd_number,
                 'upd_customer_status' => $order->upd_customer_status,
@@ -220,18 +329,114 @@ class OrderController extends Controller
         return response()->json($ordersData);
     }
     
-    /**
-     * Create new order.
-     */
+    public function getPeriodOrders(Request $request)
+    {
+        try {
+            $user = auth()->user();
+            $isAdminOrSupervisor = $user->isAdmin() || $user->isSupervisor();
+            $isDispatcher = $user->isDispatcher();
+            
+            $managerId = $request->input('manager_id');
+            $date = $request->input('date', now()->format('Y-m-d'));
+            
+            $period = $this->periodCalculator->getPeriodForDate($date);
+            
+            $query = Order::with(['manager', 'customer', 'carrier', 'driver'])
+                ->whereBetween('order_date', [$period['start'], $period['end']]);
+            
+            if ($isAdminOrSupervisor || $isDispatcher) {
+                if ($managerId) {
+                    $query->where('manager_id', $managerId);
+                }
+            } else {
+                $query->where('manager_id', $user->id);
+            }
+            
+            $orders = $query->orderBy('created_at', 'desc')->get();
+            
+            $ordersData = $orders->map(function($order) {
+                $status = $this->statusCalculator->calculate($order);
+                
+                return [
+                    'id' => $order->id,
+                    'order_number' => $order->order_number,
+                    'status_icon' => $status['icon'],
+                    'status_code' => $status['code'],
+                    'status_label' => $status['label'],
+                    'company_code' => $order->company_code,
+                    'manager_name' => $order->manager->name ?? '',
+                    'manager_id' => $order->manager_id,
+                    'order_date' => $order->order_date?->format('Y-m-d'),
+                    'loading_point' => $order->loading_point,
+                    'unloading_point' => $order->unloading_point,
+                    'cargo_description' => $order->cargo_description,
+                    'loading_date' => $order->loading_date?->format('Y-m-d'),
+                    'unloading_date' => $order->unloading_date?->format('Y-m-d'),
+                    'customer_rate' => $order->customer_rate,
+                    'customer_payment_form' => $order->customer_payment_form,
+                    'customer_payment_term' => $order->customer_payment_term,
+                    'carrier_rate' => $order->carrier_rate,
+                    'carrier_payment_form' => $order->carrier_payment_form,
+                    'carrier_payment_term' => $order->carrier_payment_term,
+                    'additional_expenses' => $order->additional_expenses,
+                    'insurance' => $order->insurance,
+                    'bonus' => $order->bonus,
+                    'kpi_percent' => $order->kpi_percent,
+                    'delta' => $order->delta,
+                    'prepayment_customer' => $order->prepayment_customer,
+                    'prepayment_date' => $order->prepayment_date?->format('Y-m-d'),
+                    'prepayment_status' => $order->prepayment_status,
+                    'prepayment_carrier' => $order->prepayment_carrier,
+                    'prepayment_carrier_date' => $order->prepayment_carrier_date?->format('Y-m-d'),
+                    'prepayment_carrier_status' => $order->prepayment_carrier_status,
+                    'final_customer' => $order->final_customer,
+                    'final_customer_date' => $order->final_customer_date?->format('Y-m-d'),
+                    'final_customer_status' => $order->final_customer_status,
+                    'final_carrier' => $order->final_carrier,
+                    'final_carrier_date' => $order->final_carrier_date?->format('Y-m-d'),
+                    'final_carrier_status' => $order->final_carrier_status,
+                    'customer_name' => $order->customer->name ?? '',
+                    'customer_contact' => $order->customer_contact,
+                    'carrier_name' => $order->carrier->name ?? '',
+                    'carrier_contact' => $order->carrier_contact,
+                    'driver_name' => $order->driver->full_name ?? '',
+                    'driver_phone' => $order->driver_phone,
+                    'salary_accrued' => $order->salary_accrued,
+                    'salary_paid' => $order->salary_paid,
+                    'track_number_customer' => $order->track_number_customer,
+                    'doc_received_date_customer' => $order->doc_received_date_customer?->format('Y-m-d'),
+                    'track_number_carrier' => $order->track_number_carrier,
+                    'doc_received_date_carrier' => $order->doc_received_date_carrier?->format('Y-m-d'),
+                    'invoice_number' => $order->invoice_number,
+                    'upd_number' => $order->upd_number,
+                    'upd_customer_status' => $order->upd_customer_status,
+                    'order_customer_status' => $order->order_customer_status,
+                    'waybill_number' => $order->waybill_number,
+                    'upd_carrier_status' => $order->upd_carrier_status,
+                    'order_carrier_status' => $order->order_carrier_status,
+                ];
+            });
+            
+            return response()->json($ordersData);
+        } catch (\Exception $e) {
+            Log::error('Error in getPeriodOrders: ' . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+    
     public function create(Request $request)
     {
         try {
             $order = new Order();
-            $order->order_number = Order::generateOrderNumber(
-                $request->company_code ?? 'ЛР',
-                auth()->id()
-            );
-            $order->company_code = $request->company_code ?? 'ЛР';
+            
+            if ($request->company_code) {
+                $order->order_number = Order::generateOrderNumber(
+                    $request->company_code,
+                    auth()->id()
+                );
+            }
+            
+            $order->company_code = $request->company_code;
             $order->manager_id = auth()->id();
             $order->site_id = session('current_site')->id ?? 1;
             $order->order_date = now();
@@ -243,6 +448,8 @@ class OrderController extends Controller
             $order->created_by = auth()->id();
             $order->save();
             
+            $status = $this->statusCalculator->calculate($order);
+            
             return response()->json([
                 'success' => true, 
                 'order' => [
@@ -251,33 +458,73 @@ class OrderController extends Controller
                     'company_code' => $order->company_code,
                     'manager_name' => auth()->user()->name,
                     'order_date' => $order->order_date->format('Y-m-d'),
+                    'status_icon' => $status['icon'],
+                    'status_code' => $status['code'],
                 ]
             ]);
         } catch (\Exception $e) {
+            Log::error('Order create error: ' . $e->getMessage());
             return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
         }
     }
     
-    /**
-     * Update order.
-     */
+    public function generateNumber(Request $request)
+    {
+        try {
+            $companyCode = $request->input('company_code');
+            if (!$companyCode) {
+                return response()->json(['success' => false, 'error' => 'Компания не выбрана'], 400);
+            }
+            
+            $managerId = $request->input('manager_id', auth()->id());
+            $orderNumber = Order::generateOrderNumber($companyCode, $managerId);
+            
+            return response()->json([
+                'success' => true,
+                'order_number' => $orderNumber
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Generate number error: ' . $e->getMessage());
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
+        }
+    }
+    
+    public function bulkDelete(Request $request)
+    {
+        try {
+            $ids = $request->input('ids', []);
+            
+            if (empty($ids)) {
+                return response()->json(['success' => false, 'error' => 'Нет выбранных записей'], 400);
+            }
+            
+            if (!auth()->user()->isAdmin() && !auth()->user()->isSupervisor()) {
+                return response()->json(['success' => false, 'error' => 'Нет прав для удаления'], 403);
+            }
+            
+            Order::whereIn('id', $ids)->delete();
+            
+            return response()->json(['success' => true, 'deleted_count' => count($ids)]);
+        } catch (\Exception $e) {
+            Log::error('Bulk delete error: ' . $e->getMessage());
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
+        }
+    }
+    
     public function update(Request $request, Order $order)
     {
         try {
-            $order->update($this->prepareData($request->all()));
+            $order->update($request->all());
             return response()->json(['success' => true]);
         } catch (\Exception $e) {
+            Log::error('Update error: ' . $e->getMessage());
             return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
         }
     }
     
-    /**
-     * Delete order.
-     */
     public function destroy(Order $order)
     {
         try {
-            // Проверка прав
             if (!auth()->user()->isAdmin() && !auth()->user()->isSupervisor()) {
                 return response()->json(['success' => false, 'error' => 'Нет прав для удаления'], 403);
             }
@@ -285,45 +532,8 @@ class OrderController extends Controller
             $order->delete();
             return response()->json(['success' => true]);
         } catch (\Exception $e) {
+            Log::error('Destroy error: ' . $e->getMessage());
             return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
         }
-    }
-    
-    /**
-     * Prepare data for saving.
-     */
-    private function prepareData(array $data): array
-    {
-        // Убираем поля, которых нет в таблице
-        $fillable = (new Order())->getFillable();
-        
-        // Добавляем updated_by
-        $data['updated_by'] = auth()->id();
-        
-        return array_filter($data, function($key) use ($fillable) {
-            return in_array($key, $fillable) || $key === 'updated_by';
-        }, ARRAY_FILTER_USE_KEY);
-    }
-    
-    /**
-     * Generate unique order number.
-     */
-    private function generateOrderNumber(): string
-    {
-        $prefix = 'ORD';
-        $year = now()->format('y');
-        $month = now()->format('m');
-        
-        $lastOrder = Order::whereYear('created_at', now()->year)
-            ->orderBy('id', 'desc')
-            ->first();
-        
-        if ($lastOrder && preg_match('/(\d+)$/', $lastOrder->order_number, $matches)) {
-            $sequence = intval($matches[1]) + 1;
-        } else {
-            $sequence = 1;
-        }
-        
-        return sprintf('%s-%s%s-%04d', $prefix, $year, $month, $sequence);
     }
 }

@@ -47,6 +47,12 @@
                             </a>
                         @endif
                         
+                        @if(auth()->user()->isAdmin() || auth()->user()->isSupervisor())
+                            <a href="{{ route('cabinet.settings.kpi') }}" class="nav-item {{ request()->routeIs('cabinet.settings.*') ? 'active' : '' }}">
+                                📊 Данные для реестра
+                            </a>
+                        @endif
+                        
                         @if(auth()->user()->hasPermission('users.view'))
                             <a href="{{ route('cabinet.users.index') }}" class="nav-item {{ request()->routeIs('cabinet.users.*') ? 'active' : '' }}">
                                 👥 Пользователи
