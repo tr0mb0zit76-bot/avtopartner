@@ -72,6 +72,8 @@ class Order extends Model
         'waybill_number',
         'upd_carrier_status',
         'order_carrier_status',
+        'doc_received_date_customer',
+        'doc_received_date_carrier',
     ];
 
     protected $casts = [
@@ -82,6 +84,8 @@ class Order extends Model
         'prepayment_carrier_date' => 'date',
         'final_customer_date' => 'date',
         'final_carrier_date' => 'date',
+        'doc_received_date_customer' => 'date',
+        'doc_received_date_carrier' => 'date',
         'customer_rate' => 'decimal:2',
         'carrier_rate' => 'decimal:2',
         'additional_expenses' => 'decimal:2',
@@ -135,40 +139,42 @@ class Order extends Model
         return $this->belongsTo(User::class, 'updated_by');
     }
 
-    // Генерация номера заявки
-    public static function generateOrderNumber($companyCode, $managerId)
+    /**
+     * Генерация номера заявки по шаблону компании
+     */
+    public static function generateOrderNumber(string $companyCode, int $managerId): string
     {
-        // Получаем менеджера
         $manager = User::find($managerId);
         if (!$manager) {
             return 'ERR-0001';
         }
         
-        // Инициалы менеджера (первые буквы имени и фамилии)
+        // Получаем инициалы
         $nameParts = explode(' ', $manager->name);
         $initials = '';
-        foreach ($nameParts as $part) {
-            if (!empty($part)) {
-                $initials .= mb_strtoupper(mb_substr($part, 0, 1));
-            }
+        if (isset($nameParts[0])) {
+            $initials .= mb_substr($nameParts[0], 0, 1);
         }
+        if (isset($nameParts[1])) {
+            $initials .= mb_substr($nameParts[1], 0, 1);
+        }
+        $initials = strtoupper($initials);
         
-        // Префикс компании
-        $prefix = match($companyCode) {
-            'ЛР' => 'ЛР',
-            'АП' => 'АП',
-            'КВ' => 'КВ',
-            default => $companyCode
+        // Получаем следующий порядковый номер
+        $lastOrder = self::where('manager_id', $managerId)
+            ->where('company_code', $companyCode)
+            ->orderBy('id', 'desc')
+            ->first();
+        
+        $sequence = $lastOrder ? ((int) substr($lastOrder->order_number, -3)) + 1 : 1;
+        $sequencePadded = str_pad($sequence, 3, '0', STR_PAD_LEFT);
+        
+        // Формируем номер по шаблону компании
+        return match($companyCode) {
+            'ЛР' => "ЛР-{$initials}-{$sequencePadded}",
+            'АП' => "{$initials}-АП-{$sequencePadded}",
+            'КВ' => "{$sequencePadded}-КВ-{$initials}",
+            default => $sequencePadded,
         };
-        
-        // Счётчик заявок менеджера по этой компании за текущий год
-        $count = self::where('company_code', $companyCode)
-            ->where('manager_id', $managerId)
-            ->whereYear('created_at', now()->year)
-            ->count();
-        
-        $sequence = str_pad($count + 1, 3, '0', STR_PAD_LEFT);
-        
-        return sprintf('%s-%s-%s', $prefix, $initials, $sequence);
     }
 }
